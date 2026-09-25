@@ -64,6 +64,38 @@ test("repeated attempts retain the first failure and latest attempt without evic
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("content-free captures record whether ChatGPT is generating or showing an alert", async () => {
+  const { createDocument } = require("@mixmark-io/domino") as { createDocument(html: string): Document };
+  const root = mkdtempSync(join(tmpdir(), "cgw-quiet-capture-"));
+  const previous = { document: globalThis.document, getComputedStyle: globalThis.getComputedStyle };
+  const page = {
+    evaluate: async (evaluator: (input: unknown) => unknown, input: unknown) => evaluator(input),
+    locator: () => ({}),
+  } as unknown as Page;
+  const capture = async (html: string) => {
+    Object.assign(globalThis, {
+      document: createDocument(html),
+      getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+    });
+    await new ChatGptBrowserDiagnostics("quiet_trace", root, true).capture(page, "tunneled-output-quiet");
+    const [directory] = readdirSync(root).map(name => join(root, name));
+    const content = readFileSync(join(directory!, readdirSync(directory!)[0]!), "utf8");
+    rmSync(directory!, { recursive: true, force: true });
+    return { content, state: JSON.parse(content).state };
+  };
+  try {
+    const stopped = await capture('<form data-chatgpt-composer><div role="alert">PRIVATE_ERROR</div></form>');
+    expect(stopped.state).toMatchObject({ generationRunning: false, alertVisible: true });
+    expect(stopped.content).not.toContain("PRIVATE");
+    const running = await capture('<form data-chatgpt-composer><button class="size-token-button-composer" type="button">Stop</button></form>');
+    expect(running.state).toMatchObject({ generationRunning: true, alertVisible: false });
+    expect(Object.values(running.state).every(value => typeof value === "boolean")).toBe(true);
+  } finally {
+    Object.assign(globalThis, previous);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("connector verification records only capabilities even when screenshots are enabled", async () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-verification-private-"));
   const previous = process.env.CODEX_CHATGPT_WEB_BROWSER_DIAGNOSTICS;

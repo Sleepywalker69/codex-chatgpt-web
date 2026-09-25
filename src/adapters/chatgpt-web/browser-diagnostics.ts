@@ -206,11 +206,15 @@ async function captureVerificationCapabilities(page: Page): Promise<Record<strin
       menuVisible: any('[role="menu"], [role="listbox"], [data-testid="composer-intelligence-picker-content"]'),
       connectorRowsVisible: any('.__menu-item[tabindex="0"], [data-list-navigation-item="true"]'),
       overlayVisible: any('[role="dialog"], [role="alert"], [role="status"]'),
+      // A quiet tunneled turn is either still generating or stopped, possibly with an error alert.
+      alertVisible: any('[role="alert"]'),
+      generationRunning: any(selectors.stopButton),
     };
   }, {
     composer: CHATGPT_COMPOSER_SELECTOR,
     effortControl: CHATGPT_EFFORT_CONTROL_SELECTOR,
     effortItem: CHATGPT_EFFORT_ITEM_SELECTOR,
+    stopButton: CHATGPT_STOP_BUTTON_SELECTOR,
   });
 }
 
