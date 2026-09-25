@@ -43,6 +43,13 @@ export function chatGptTurnSteeringId(threadId: string, turnId: string): string 
   return `${threadId}:${turnId}`;
 }
 
+/** The response key of a compaction's own native turn, which keys that turn's live browser session. */
+export function chatGptCompactionNativeTurnExecutionKey(parsed: CodexParsedRequest): string {
+  const identity = extractChatGptTurnIdentity(parsed);
+  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  return executionKey(parsed, { threadId: identity.threadId, turnId: identity.turnId, purpose: "response" });
+}
+
 /** Locate the browser response that a native mid-turn compaction replaces. */
 export function chatGptCompactionSourceExecutionKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);

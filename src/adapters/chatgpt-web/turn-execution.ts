@@ -6,6 +6,7 @@ import { ChatGptWebAdapterError } from "./adapter-error";
 import type { ChatGptExternalTurnProgress } from "./turn-progress";
 export { chatGptConversationKey, chatGptTurnTraceId } from "./conversation-key";
 export {
+  chatGptCompactionNativeTurnExecutionKey,
   chatGptCompactionSourceExecutionKey,
   chatGptTurnExecutionKey,
   chatGptTurnSteeringId,

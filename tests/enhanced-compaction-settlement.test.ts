@@ -140,7 +140,10 @@ test("a compaction that cannot find its source logs how the live source turn was
   expect(line).toBeDefined();
   expect(JSON.parse(line!.slice(line!.indexOf("{")))).toEqual({
     model: CHATGPT_WEB_MODEL_ID, family: null, reasoning: "medium", sourceTurn: "history",
-    liveSessionsForSourceTurn: [{ model: CHATGPT_WEB_MODEL_ID, family: null, reasoning: "xhigh" }],
+    liveSessionsForSourceTurn: [{ model: CHATGPT_WEB_MODEL_ID, family: null, reasoning: "xhigh",
+      active: false, sameConversation: true }],
+    // The compaction's own native turn has no live session either.
+    liveSessionsForRequestTurn: [],
   });
   expect(warnings).toContain("[chatgpt-web] retained compaction fallback=source_unavailable_before_handoff");
 });

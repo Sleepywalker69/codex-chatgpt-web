@@ -40,18 +40,22 @@ interface EnhancedCompactionOptions {
 function logRetainedCompactionSourceMiss(
   parsed: CodexParsedRequest,
   identity: ReturnType<typeof extractChatGptTurnIdentity>,
+  conversationKey: string | undefined,
 ): void {
   let historyTurnId: string | undefined;
   try { historyTurnId = extractChatGptCompactionSourceRevision(parsed).turnId; } catch { /* diagnostics only */ }
   const sourceTurnId = historyTurnId ?? identity.turnId;
+  const shapes = (turnId: string | undefined) => identity.threadId && turnId
+    ? chatGptTurnSessions.nativeTurnSessionShapes(identity.threadId, turnId, conversationKey)
+    : null;
+  const historySource = historyTurnId !== undefined && historyTurnId !== identity.turnId;
   console.warn(`[chatgpt-web] retained compaction source not found ${JSON.stringify({
     model: parsed.modelId,
     family: parsed._chatgptModelFamily ?? null,
     reasoning: parsed.options.reasoning ?? null,
-    sourceTurn: historyTurnId === undefined || historyTurnId === identity.turnId ? "request" : "history",
-    liveSessionsForSourceTurn: identity.threadId && sourceTurnId
-      ? chatGptTurnSessions.nativeTurnSessionShapes(identity.threadId, sourceTurnId)
-      : null,
+    sourceTurn: historySource ? "history" : "request",
+    liveSessionsForSourceTurn: shapes(sourceTurnId),
+    ...(historySource ? { liveSessionsForRequestTurn: shapes(identity.turnId) } : {}),
   })}`);
 }
 
@@ -121,7 +125,7 @@ export async function runEnhancedCompaction(
       preserveFinal = !source?.isActive() && source?.settledOutcome()?.type === "final";
       const conversationKey = source?.conversationKey();
       if (!source || !conversationKey) {
-        if (!source) logRetainedCompactionSourceMiss(parsed, identity);
+        if (!source) logRetainedCompactionSourceMiss(parsed, identity, sourceConversationKey);
         if (source) await withCompactionAbort(
           chatGptTurnSessions.retireAndWait(responseExecutionKey), operationSignal,
         );

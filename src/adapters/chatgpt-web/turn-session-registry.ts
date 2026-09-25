@@ -119,6 +119,21 @@ export class ChatGptTurnSessions {
     return this.entries.get(key);
   }
 
+  /**
+   * The session a native compaction replaces. A mid-turn compaction replaces the browser turn still
+   * running in its Web conversation or for its own native turn. Otherwise the source is the session of
+   * the history's latest instruction, which after an earlier compaction can belong to an older turn.
+   */
+  compactionSourceKey(keys: { history: string; nativeTurn: string; conversation?: string }): string {
+    this.prune();
+    if (keys.conversation !== undefined) {
+      for (const [key, session] of this.entries) {
+        if (session.isActive() && session.conversationKey() === keys.conversation) return key;
+      }
+    }
+    return this.entries.get(keys.nativeTurn)?.isActive() ? keys.nativeTurn : keys.history;
+  }
+
   async waitForRetirement(key: string, signal?: AbortSignal): Promise<void> {
     const pending = this.retirements.get(key);
     if (pending) await withAbort(pending, signal);
@@ -242,13 +257,17 @@ export class ChatGptTurnSessions {
   }
 
   /** Diagnostics only: how live sessions of one native turn were keyed, without their content. */
-  nativeTurnSessionShapes(threadId: string, turnId: string): Array<{ model: string | null; family: string | null; reasoning: string | null }> {
+  nativeTurnSessionShapes(threadId: string, turnId: string, conversationKey?: string): Array<{
+    model: string | null; family: string | null; reasoning: string | null; active: boolean; sameConversation: boolean;
+  }> {
     return [...this.entries.values()]
       .filter(session => session.runtime.nativeIdentity?.threadId === threadId && session.runtime.nativeIdentity.turnId === turnId)
       .map(session => ({
         model: session.runtime.usageInput?.modelId ?? null,
         family: session.runtime.usageInput?._chatgptModelFamily ?? null,
         reasoning: session.runtime.usageInput?.options.reasoning ?? null,
+        active: session.isActive(),
+        sameConversation: conversationKey !== undefined && session.conversationKey() === conversationKey,
       }));
   }
 

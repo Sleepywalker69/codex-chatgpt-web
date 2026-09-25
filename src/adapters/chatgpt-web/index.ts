@@ -19,7 +19,7 @@ import { chatGptNoContextStallTimeoutMs } from "./prompt-attachment-budget";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
 import { brokerSocketPath, ChatGptSurfaceRecoveryTracker, withAbort } from "./runtime-lifecycle";
 import { TurnBroker, type TurnBrokerOwner } from "./turn-broker";
-import { chatGptCompactionSourceExecutionKey, chatGptConversationKey, chatGptTurnExecutionKey, chatGptTurnSessions, chatGptTurnTraceId, type ChatGptTraceEvent } from "./turn-execution";
+import { chatGptCompactionNativeTurnExecutionKey, chatGptCompactionSourceExecutionKey, chatGptConversationKey, chatGptTurnExecutionKey, chatGptTurnSessions, chatGptTurnTraceId, type ChatGptTraceEvent } from "./turn-execution";
 import { chatGptTurnRetryKey, chatGptPromptFailureKey } from "./turn-retry-identity";
 import { appendCompactionUserPrompt, emitBrowserCompletion, emitProContextWarning, emitTextDeltas, emitToolBatch, emitTraceEvents, replayEvents, runtimeUsageInput } from "./turn-events";
 import { estimateChatGptWebUsage } from "./usage";
@@ -216,7 +216,11 @@ export function createChatGptWebAdapter(
         );
       }
       const compactionSourceExecutionKey = parsed._compactionRequest
-        ? `${executionNamespace}:${chatGptCompactionSourceExecutionKey(parsed)}`
+        ? chatGptTurnSessions.compactionSourceKey({
+            history: `${executionNamespace}:${chatGptCompactionSourceExecutionKey(parsed)}`,
+            nativeTurn: `${executionNamespace}:${chatGptCompactionNativeTurnExecutionKey(parsed)}`,
+            conversation: chatGptConversationKey(parsed, executionNamespace),
+          })
         : undefined;
       const admissionTraceId = !manualInteraction && compactionSourceExecutionKey
         ? chatGptTurnSessions.find(compactionSourceExecutionKey)?.traceId ?? traceId
