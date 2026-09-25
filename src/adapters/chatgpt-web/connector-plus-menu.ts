@@ -1,4 +1,5 @@
 import type { Locator, Page } from "playwright-core";
+import { CHATGPT_COMPOSER_PLUS_SELECTOR } from "../../chatgpt-session";
 
 const CONNECTOR_MENU_TIMEOUT_MS = 2_500;
 
@@ -7,7 +8,7 @@ export async function openChatGptConnectorPlusMenu(
   appName: string,
   signal?: AbortSignal,
 ): Promise<Locator | undefined> {
-  const plus = page.getByTestId("composer-plus-btn").filter({ visible: true });
+  const plus = page.locator(CHATGPT_COMPOSER_PLUS_SELECTOR).filter({ visible: true });
   const plusCount = await plus.count();
   if (plusCount === 0) return undefined;
   if (plusCount !== 1) throw new Error("ChatGPT composer exposed duplicate plus controls");

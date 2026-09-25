@@ -1,0 +1,11 @@
+import { join, resolve } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
+const root = resolve(import.meta.dir, "..");
+const out = resolve(process.argv[2] ?? join(root, "dist", "local-app"));
+rmSync(out, { recursive: true, force: true });
+mkdirSync(out, { recursive: true });
+const a = await Bun.build({ entrypoints: [join(root, "src", "cli.ts"), join(root, "src", "codex-interrupt-cli.ts")], target: "bun", minify: true, external: ["playwright-core"], packages: "external", outdir: out, naming: "[name].js" });
+if (!a.success) throw new Error("cli build failed: " + a.logs.map(l => l.message).join("; "));
+const b = await Bun.build({ entrypoints: [join(root, "src", "adapters", "chatgpt-web", "browser-helper-main.ts")], target: "node", format: "cjs", minify: true, external: ["playwright-core"], packages: "external", outdir: out, naming: "browser-helper.cjs" });
+if (!b.success) throw new Error("helper build failed: " + b.logs.map(l => l.message).join("; "));
+console.log("built " + out);

@@ -34,9 +34,17 @@ export async function selectChatGptModelFamily(
     if (await option.count() > 1) throw familyError(family);
     if (await option.count() === 1 && await option.getAttribute("aria-checked") === "true") return menu;
     // The attached radio rows are inert while this composer-owned advanced view is collapsed.
-    const trigger = menu.menu.locator('[role="menuitem"][aria-expanded][aria-hidden="false"]');
+    // The app-shell picker has no aria-expanded owner: a view toggle swaps the Power view for
+    // the model list, and the inactive view is marked data-active="false".
+    const trigger = menu.menu.locator([
+      '[role="menuitem"][aria-expanded][aria-hidden="false"]',
+      '[role="menuitem"][data-model-picker-view-toggle="true"][aria-hidden="false"]',
+    ].join(", "));
     if (await trigger.count() !== 1) throw familyError(family);
-    if (await trigger.getAttribute("aria-expanded") === "false") await trigger.click({ timeout: 5_000 });
+    const collapsed = await trigger.getAttribute("aria-expanded") === "false"
+      || (await trigger.getAttribute("data-model-picker-view-toggle") === "true"
+        && await option.evaluate(element => element.closest("[data-active]")?.getAttribute("data-active") === "false"));
+    if (collapsed) await trigger.click({ timeout: 5_000 });
     await option.waitFor({ state: "visible", timeout: 5_000 });
     await option.click({ timeout: 5_000 });
     await page.keyboard.press("Escape");

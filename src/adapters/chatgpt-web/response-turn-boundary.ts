@@ -39,7 +39,8 @@ export async function readChatGptAssistantTurnState(
 ): Promise<ChatGptAssistantTurnState> {
   const state = await turns.evaluateAll(elements => {
     const count = elements.length;
-    const identities = elements.map(element => element.getAttribute("data-turn-id"));
+    // Legacy turns carry data-turn-id; app-shell exchange containers carry data-turn-key.
+    const identities = elements.map(element => element.getAttribute("data-turn-id") ?? element.getAttribute("data-turn-key"));
     if (identities.some(identity => typeof identity !== "string" || identity.trim().length === 0)) {
       throw new Error("ChatGPT assistant turn has no stable data-turn-id identity");
     }
@@ -57,7 +58,7 @@ export async function readChatGptAssistantTurnState(
   const page = (turns as unknown as Partial<Pick<Locator, "page">>).page?.();
   if (!page) return stableState;
   const knownTurnIdentities = await readChatGptTurnIdentities(
-    page.locator("[data-turn-id-container]"), "data-turn-id-container",
+    page.locator("[data-turn-id-container], [data-turn-key]"), "data-turn-id-container",
   );
   const known = new Set(knownTurnIdentities);
   if (stableState.identities.some(identity => !known.has(identity))) {
@@ -75,7 +76,7 @@ export async function readChatGptTurnIdentities(
       ? elements.filter(element => element.parentElement?.closest("[data-turn-id-container]")
         ?.getAttribute("data-turn-id-container") !== element.getAttribute("data-turn-id-container"))
       : elements;
-    const identities = candidates.map(element => element.getAttribute(name));
+    const identities = candidates.map(element => element.getAttribute(name) ?? element.getAttribute("data-turn-key"));
     if (identities.some(identity => typeof identity !== "string" || identity.trim().length === 0)) {
       throw new Error(`ChatGPT conversation turn has no stable ${name} identity`);
     }
@@ -150,7 +151,8 @@ export function locateChatGptAssistantTurn(
   turns: Locator,
   binding: ChatGptAssistantTurnBinding,
 ): Locator {
-  return turns.page().locator(`[data-turn-id=${JSON.stringify(binding.id)}]`);
+  const id = JSON.stringify(binding.id);
+  return turns.page().locator(`[data-turn-id=${id}], [data-turn-key=${id}]`);
 }
 
 export function chatGptSubmissionEvidence(state: {

@@ -11,47 +11,88 @@ export const CHATGPT_COMPOSER_SELECTOR = [
   '[data-testid="prompt-textarea"]',
   "#prompt-textarea",
   '[contenteditable="true"][data-lexical-editor="true"]',
+  // App-shell composer (2026-09-24): a bare ProseMirror textbox owned by the composer form,
+  // with no test id or element id.
+  'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]',
 ].join(", ");
 export const CHATGPT_EFFORT_CONTROL_SELECTOR = [
   'button[data-tone="neutral"][aria-haspopup="menu"]',
   'button[data-testid="model-switcher-dropdown-button"][aria-haspopup="menu"]',
+  // App-shell composer: the "Select ChatGPT model" pill.
+  'button[data-codex-intelligence-trigger][aria-haspopup="menu"]',
 ].join(", ");
+const CHATGPT_EFFORT_SURFACE_MARKERS =
+  '[role="menuitemradio"], [data-model-reasoning-effort-slider], [data-model-picker-power-slider]';
 export const CHATGPT_EFFORT_MENU_SELECTOR = [
-  '[data-testid="composer-intelligence-picker-content"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider])',
-  '[role="menu"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider])',
-  '[role="group"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider])',
+  `[data-testid="composer-intelligence-picker-content"]:has(${CHATGPT_EFFORT_SURFACE_MARKERS})`,
+  `[role="menu"]:has(${CHATGPT_EFFORT_SURFACE_MARKERS})`,
+  `[role="group"]:has(${CHATGPT_EFFORT_SURFACE_MARKERS})`,
 ].join(", ");
 export const CHATGPT_EFFORT_ITEM_SELECTOR = '[role="menuitemradio"]';
-export const CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR = '[data-model-reasoning-effort-slider]';
+// The app-shell picker renames the effort slider to a "Power" slider with the same ARIA range.
+export const CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR =
+  '[data-model-reasoning-effort-slider], [data-model-picker-power-slider]';
 export const CHATGPT_EFFORT_SLIDER_SELECTOR = [
   '[data-testid="composer-intelligence-picker-content"] [role="slider"]',
   '[data-model-reasoning-effort-slider] [role="slider"]',
+  '[data-model-picker-power-slider] [role="slider"]',
 ].join(", ");
+/** Send control inside the composer form: legacy test id, or the app-shell submit button. */
+export const CHATGPT_SEND_BUTTON_SELECTOR = '[data-testid="send-button"], button[type="submit"]';
+export const CHATGPT_COMPOSER_PLUS_SELECTOR = [
+  '[data-testid="composer-plus-btn"]',
+  'form[data-chatgpt-composer] button[data-composer-navigation-target="add-context"]',
+].join(", ");
+/** Composer typeahead rows: legacy `.__menu-item`, or app-shell list-navigation buttons. */
+export const CHATGPT_COMPOSER_MENU_ROW_SELECTOR = '.__menu-item[tabindex="0"], [data-list-navigation-item="true"]';
+/** A connector selected in the composer: legacy plugin pill, or app-shell mention node. */
+export function chatGptSelectedConnectorSelector(appName: string): string {
+  const name = JSON.stringify(appName);
+  return `[data-id^="plugin:"][data-keyword=${name}], [app-mention-display-name=${name}]`;
+}
 export const CHATGPT_EFFORT_SLIDER_MAX_OPTIONS = 5;
 export const CHATGPT_TEMPORARY_CHAT_MODE_BUTTON_SELECTOR = [
   '[data-testid="thread-header-right-actions"] button[aria-haspopup="menu"]',
   '#conversation-header-actions button[aria-haspopup="menu"]',
   'div:has(> [data-testid="temporary-chat-label"]) + div button[aria-expanded]',
 ].join(", ");
-export const CHATGPT_STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]';
-export const CHATGPT_COMPLETION_ACTION_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+export const CHATGPT_STOP_BUTTON_SELECTOR = [
+  '[data-testid="stop-button"]',
+  // App-shell composer: the send slot turns from type="submit" into a type="button" Stop control
+  // while a response is generating.
+  'form[data-chatgpt-composer] button.size-token-button-composer[type="button"]',
+].join(", ");
+export const CHATGPT_COMPLETION_ACTION_SELECTOR = [
+  'button[data-testid="copy-turn-action-button"]',
+  // App-shell turns: the assistant action bar (Rate / Regenerate / More menus) appears only after
+  // the answer settles; the user bar beside it has no menu buttons.
+  '.turn-action-controls button[aria-haspopup="menu"]',
+].join(", ");
+// App-shell conversations render one data-turn-key container per exchange (user message plus the
+// assistant reply). Its key is the stable turn identity; the halves are told apart by the
+// assistant role heading and the user message bubble.
 export const CHATGPT_ASSISTANT_TURN_SELECTOR = [
   '[data-testid^="conversation-turn-"][data-turn="assistant"]',
   '[data-testid^="conversation-turn-"][data-message-author-role="assistant"]',
   '[data-testid^="conversation-turn-"]:has([data-message-author-role="assistant"])',
+  '[data-turn-key]:has([data-conversation-role="assistant"])',
 ].join(", ");
 export const CHATGPT_USER_TURN_SELECTOR = [
   '[data-testid^="conversation-turn-"][data-turn="user"]',
   '[data-testid^="conversation-turn-"][data-message-author-role="user"]',
   '[data-testid^="conversation-turn-"]:has([data-message-author-role="user"])',
+  '[data-turn-key]:has([data-user-message-bubble])',
 ].join(", ");
 
 export function isTemporaryChatGptUrl(value: string): boolean {
   try {
     const url = new URL(value);
     const expected = new URL(CHATGPT_TEMPORARY_CHAT_URL);
+    // App-shell Temporary Chats move to /c/<conversation-id> once the first message is sent and
+    // keep the temporary-chat flag on that route; the conversation is still temporary. The id is
+    // first a client-local placeholder (local-chatgpt%3A<uuid>) and then the server id.
     return url.origin === expected.origin
-      && url.pathname === expected.pathname
+      && (url.pathname === expected.pathname || /^\/c\/[^/]+$/.test(url.pathname))
       && url.searchParams.get("temporary-chat") === "true";
   } catch {
     return false;
@@ -186,10 +227,21 @@ export async function readChatGptEffortAvailability(
 ): Promise<boolean[]> {
   // Plus exposes a fourth ARIA position for a locked Pro upsell. Only the ticks
   // carry both attributes; the slider root also has data-locked and is not a choice.
-  const locks = await sliderContainer.evaluate(container => Array.from(
-    container.querySelectorAll("[data-locked][data-selected]"),
-    tick => tick.getAttribute("data-locked"),
-  ));
+  // The app-shell Power slider's ticks carry data-selected only; a locked tick there is
+  // marked by data-locked, aria-disabled or data-disabled on the tick itself.
+  const locks = await sliderContainer.evaluate(container => {
+    const legacy = Array.from(
+      container.querySelectorAll("[data-locked][data-selected]"),
+      tick => tick.getAttribute("data-locked"),
+    );
+    if (legacy.length > 0) return legacy;
+    return Array.from(container.querySelectorAll("[data-selected]"), tick => (
+      tick.getAttribute("data-locked") === "true"
+        || tick.getAttribute("aria-disabled") === "true"
+        || tick.hasAttribute("data-disabled")
+        ? "true" : "false"
+    ));
+  });
   if (locks.length !== state.max - state.min + 1
     || locks.some(lock => lock !== "true" && lock !== "false")) {
     throw new Error("ChatGPT effort availability could not be verified from its slider ticks");

@@ -83,7 +83,7 @@ async function restoreChatGptPromptMarkdownRanges(
         attempts += 1; const ok = document.execCommand(command, false, value);
         if (ok) accepted += 1; return ok;
       };
-      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
       const values = new Map(input.replacements.map(replacement => [replacement.marker, replacement.value]));
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       let candidate: { node: Text; right: number } | undefined;
@@ -130,7 +130,7 @@ async function restoreChatGptPromptMarkdownRanges(
     }
     await op.poll(0);
     const observedRemaining = await op.read(options => composer.evaluate((element, values) => {
-      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
       const markerSet = new Set(values);
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       let found = 0;
@@ -164,7 +164,7 @@ async function restoreChatGptPromptMarkdownExactly(
   op.check();
   const markers = replacements.map(replacement => replacement.marker);
   const countMarkers = () => op.read(options => composer.evaluate((element, values) => {
-    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
     const markerSet = new Set(values);
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let found = 0;
@@ -190,7 +190,7 @@ async function restoreChatGptPromptMarkdownExactly(
         attempts += 1; const ok = document.execCommand(command, false, value);
         if (ok) accepted += 1; return ok;
       };
-      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
       const selection = window.getSelection();
       if (!selection) return result(0);
       const values = new Map(input.replacements.map(replacement => [replacement.marker, replacement.value]));
@@ -415,7 +415,7 @@ export async function restoreChatGptPromptChunkBoundary(
       attempts += 1; const ok = document.execCommand(command, false, value);
       if (ok) accepted += 1; return ok;
     };
-    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     let match: { node: Text; offset: number } | undefined;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -441,7 +441,7 @@ export async function restoreChatGptPromptChunkBoundary(
   await op.poll(0);
   if (abortSignal?.aborted) throw abortSignal.reason ?? new DOMException("Prompt attachment aborted", "AbortError");
   return await op.read(options => composer.evaluate((element, marker) => {
-    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+    const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node as Text;
@@ -482,7 +482,7 @@ export async function reanchorChatGptComposerCaret(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await op.mutate(options => composer.focus(options));
     const evidence = await op.mutate(options => composer.evaluate(async element => {
-      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]';
+      const ignoredSelector = '[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]';
       const editableRootNodes = [...element.childNodes].filter(node => (
         node.nodeType === Node.TEXT_NODE
           ? (node.textContent ?? "").length > 0

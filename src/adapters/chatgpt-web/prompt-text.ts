@@ -23,7 +23,8 @@ export function readChatGptPromptText(
   options?: { preserveLeading?: boolean },
 ): string {
   const clone = element.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target]')
+  // Legacy plugin pills and app-shell mention nodes are composer chrome, not prompt text.
+  clone.querySelectorAll('[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]')
     .forEach(part => part.remove());
   const text = [...clone.childNodes].map(child => child.textContent ?? "").join("\n");
   return options?.preserveLeading ? text : text.trimStart();

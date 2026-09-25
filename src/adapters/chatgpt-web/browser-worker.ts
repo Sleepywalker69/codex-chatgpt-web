@@ -112,15 +112,18 @@ import {
   chatGptNewChatUrl,
   CHATGPT_ASSISTANT_TURN_SELECTOR,
   CHATGPT_COMPLETION_ACTION_SELECTOR,
+  CHATGPT_COMPOSER_MENU_ROW_SELECTOR,
   CHATGPT_COMPOSER_SELECTOR,
   CHATGPT_EFFORT_CONTROL_SELECTOR,
   CHATGPT_EFFORT_ITEM_SELECTOR,
   CHATGPT_EFFORT_MENU_SELECTOR,
   activateChatGptEffortMenu,
   CHATGPT_EFFORT_SLIDER_SELECTOR,
+  CHATGPT_SEND_BUTTON_SELECTOR,
   CHATGPT_STOP_BUTTON_SELECTOR,
   CHATGPT_USER_TURN_SELECTOR,
   chatGptEffortSliderAdvancedTowardTarget,
+  chatGptSelectedConnectorSelector,
   detectChatGptAccountCapabilities,
   isTemporaryChatGptUrl,
   parseChatGptEffortSliderState,
@@ -257,7 +260,8 @@ export const CHATGPT_SEND_ENABLE_GRACE_MS = 5_000;
 const CHATGPT_DOM_REVISION_ATTRIBUTES = [
   "aria-hidden", "aria-label", "aria-busy", "aria-disabled", "aria-expanded", "class",
   "data-item-anchor", "data-is-last-node", "data-message-author-role", "data-state",
-  "data-streaming-response-status", "data-testid", "data-turn", "data-turn-id",
+  "data-streaming-response-status", "data-testid", "data-turn", "data-turn-id", "data-turn-key",
+  "data-conversation-role", "data-chatgpt-search-message-ids", "type",
   "data-turn-id-container", "disabled", "hidden",
   "inert", "open", "role", "start", "style",
 ] as const;
@@ -1776,7 +1780,7 @@ export class ChatGptBrowserWorker {
     const composer = await this.activeComposer(page);
     const sendButton = composer
       .locator("xpath=ancestor::form[1]")
-      .getByTestId("send-button");
+      .locator(CHATGPT_SEND_BUTTON_SELECTOR);
     await sendButton.waitFor({ state: "visible", timeout: browserStageTimeouts.send });
     await settleChatGptUi();
     const sendEnableDeadline = Date.now() + CHATGPT_SEND_ENABLE_GRACE_MS;
@@ -1968,14 +1972,14 @@ export class ChatGptBrowserWorker {
   private selectedConnectorControl(composer: Locator): Locator {
     return composer
       .locator("xpath=ancestor::form[1]")
-      .locator(`[data-id^="plugin:"][data-keyword=${JSON.stringify(this.config.appName)}]`)
+      .locator(chatGptSelectedConnectorSelector(this.config.appName))
       .filter({ visible: true });
   }
 
   private async connectorIsSelected(composer: Locator, signal?: AbortSignal): Promise<boolean> {
     const selected = this.selectedConnectorControl(composer);
     const keywords = await withBrowserTurnAbort(selected.evaluateAll(elements => (
-      elements.map(element => element.getAttribute("data-keyword"))
+      elements.map(element => element.getAttribute("data-keyword") ?? element.getAttribute("app-mention-display-name"))
     )), signal);
     const exactMatches = keywords.filter(keyword => keyword === this.config.appName).length;
     if (exactMatches > 1) {
@@ -2070,7 +2074,7 @@ export class ChatGptBrowserWorker {
       await withBrowserTurnAbort(captureDiagnostic?.(checkpoint) ?? Promise.resolve(), abortSignal);
       throwIfPromptAttachmentAborted(abortSignal);
     };
-    const menuRows = page.locator('.__menu-item[tabindex="0"]');
+    const menuRows = page.locator(CHATGPT_COMPOSER_MENU_ROW_SELECTOR);
     const appResult = menuRows.filter({
       has: page.getByText(this.config.appName, { exact: true }),
     });
@@ -2218,10 +2222,11 @@ export class ChatGptBrowserWorker {
           + ` after ${attemptBudget.triggerAttempts} complete mention trigger attempt(s)`,
         );
       }
+      // Legacy rows mark the active choice with data-highlighted; app-shell rows use aria-current.
       const rowHighlighted = async () => await appResult.getAttribute(
         "data-highlighted",
         op.options(10_000),
-      ) !== null;
+      ) !== null || await appResult.getAttribute("aria-current", op.options(10_000)) === "true";
       if (!await rowHighlighted()) {
         const visibleRowCount = await withBrowserTurnAbort(
           withChatGptBrowserObservationTimeout(menuRows.filter({ visible: true }).count()),
@@ -2653,7 +2658,7 @@ export class ChatGptBrowserWorker {
         + (alerts.length > 0 ? `: ${alerts.join(" | ")}` : ""),
       );
     }
-    const send = composerForm.getByTestId("send-button");
+    const send = composerForm.locator(CHATGPT_SEND_BUTTON_SELECTOR);
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       if (await send.isEnabled().catch(() => false)) return;
@@ -2690,7 +2695,8 @@ export class ChatGptBrowserWorker {
 
       // ChatGPT's DIL renderer has no .markdown class (#538). Its build-specific CSS module still
       // lives under the assistant-owned PUIK response root.
-      const answerRootSelector = '.markdown, [data-message-author-role="assistant"] .puik-root.not-markdown > [class*="_DilResponseRoot"]';
+      // App-shell turns expose assistant Markdown as [data-markdown-text-style="assistant-message"].
+      const answerRootSelector = '.markdown, [data-message-author-role="assistant"] .puik-root.not-markdown > [class*="_DilResponseRoot"], [data-markdown-text-style="assistant-message"]';
       // ChatGPT uses the same content renderer for intermediate commentary and for the final
       // answer. Older responses nested commentary in the streaming-status container. Pro can also
       // render a completed commentary Markdown root immediately before that live status container.
@@ -3007,7 +3013,7 @@ export class ChatGptBrowserWorker {
         ? completionActions.find(candidate => !rendered.contains(candidate)
           && Boolean(rendered.compareDocumentPosition(candidate) & Node.DOCUMENT_POSITION_FOLLOWING))
         : completionActions.at(-1);
-      const structuredResponsePresent = root.querySelector(".markdown, .puik-root.not-markdown") !== null;
+      const structuredResponsePresent = root.querySelector('.markdown, .puik-root.not-markdown, [data-markdown-text-style="assistant-message"]') !== null;
       const plainTextFallback = renderedRoots.length === 0 && !structuredResponsePresent && completionAction ? (() => {
         const blocks = new Set(["ADDRESS", "ARTICLE", "BLOCKQUOTE", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "P", "PRE", "TR"]);
         const collect = (node: Node): string => {
@@ -3853,7 +3859,7 @@ export class ChatGptBrowserWorker {
         const composer = await this.activeComposer(page);
         const sendButton = composer
           .locator("xpath=ancestor::form[1]")
-          .getByTestId("send-button");
+          .locator(CHATGPT_SEND_BUTTON_SELECTOR);
         await sendButton.waitFor({ state: "visible", timeout: browserStageTimeouts.send });
         await settleChatGptUi();
         const sendEnableDeadline = Date.now() + CHATGPT_SEND_ENABLE_GRACE_MS;
@@ -4040,7 +4046,7 @@ export class ChatGptBrowserWorker {
               }
               const responsePresent = chatGptAssistantTurnChanged(initialResponseTurn, current);
               if (responsePresent && current.lastId) {
-                await throwIfChatGptTerminalErrorAlert(page.locator(`[data-turn-id=${JSON.stringify(current.lastId)}]`));
+                await throwIfChatGptTerminalErrorAlert(page.locator(`[data-turn-id=${JSON.stringify(current.lastId)}], [data-turn-key=${JSON.stringify(current.lastId)}]`));
               }
               const running = await page.locator(CHATGPT_STOP_BUTTON_SELECTOR).last().isVisible().catch(() => false);
               const progress = turn.externalProgress?.snapshot();

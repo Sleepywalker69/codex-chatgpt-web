@@ -36,8 +36,8 @@ export async function setChatGptThinkMode(
     const composer = composerForm.locator(CHATGPT_COMPOSER_SELECTOR).filter({ visible: true }).first();
     const composerState = () => composer.evaluate(element => {
       const copy = element.cloneNode(true) as HTMLElement;
-      const pills = [...copy.querySelectorAll('[data-id^="plugin:"][data-keyword]')];
-      const connectors = pills.map(pill => pill.getAttribute("data-keyword")).sort();
+      const pills = [...copy.querySelectorAll('[data-id^="plugin:"][data-keyword], [app-mention-display-name]')];
+      const connectors = pills.map(pill => pill.getAttribute("data-keyword") ?? pill.getAttribute("app-mention-display-name")).sort();
       for (const pill of pills) pill.remove();
       const text = element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
         ? element.value : copy.textContent ?? "";

@@ -50,7 +50,7 @@ export function browserDiagnosticIncludesScreenshot(
 
 function diagnosticScreenshotMask(page: Page) {
   return [
-    page.locator('[data-testid^="conversation-turn-"]'),
+    page.locator('[data-testid^="conversation-turn-"], [data-turn-key]'),
     page.locator(CHATGPT_COMPOSER_SELECTOR),
     page.locator('[role="dialog"], [role="alert"], [role="status"], [data-radix-popper-content-wrapper]'),
     page.locator('[data-testid*="profile" i], [data-testid*="account" i], [aria-label*="profile" i], [aria-label*="account" i]'),
@@ -199,12 +199,12 @@ async function captureVerificationCapabilities(page: Page): Promise<Record<strin
     return {
       composerVisible: composers.length === 1,
       connectorSelected: composerForm !== null
-        && any('[data-id^="plugin:"][data-keyword]', composerForm),
-      mentionMenuVisible: any('.__menu-item[tabindex="0"][data-id^="plugin:"][data-keyword], .__menu-item[tabindex="0"] [data-id^="plugin:"][data-keyword]'),
+        && any('[data-id^="plugin:"][data-keyword], [app-mention-display-name]', composerForm),
+      mentionMenuVisible: any('.__menu-item[tabindex="0"][data-id^="plugin:"][data-keyword], .__menu-item[tabindex="0"] [data-id^="plugin:"][data-keyword], [data-list-navigation-item="true"]'),
       effortControlVisible: any(selectors.effortControl),
       effortItemsVisible: any(selectors.effortItem),
       menuVisible: any('[role="menu"], [role="listbox"], [data-testid="composer-intelligence-picker-content"]'),
-      connectorRowsVisible: any('.__menu-item[tabindex="0"]'),
+      connectorRowsVisible: any('.__menu-item[tabindex="0"], [data-list-navigation-item="true"]'),
       overlayVisible: any('[role="dialog"], [role="alert"], [role="status"]'),
     };
   }, {
@@ -250,8 +250,8 @@ async function captureBrowserDiagnosticState(
       ? assistantTurns.find(element => element.getAttribute("data-testid") === binding.id)
       : assistantTurns.at(binding?.ordinal ?? -1);
     const finalRoot = latestAssistant
-      ? [...latestAssistant.querySelectorAll<HTMLElement>(".markdown")]
-        .filter(candidate => !candidate.parentElement?.closest(".markdown"))
+      ? [...latestAssistant.querySelectorAll<HTMLElement>('.markdown, [data-markdown-text-style="assistant-message"]')]
+        .filter(candidate => !candidate.parentElement?.closest('.markdown, [data-markdown-text-style="assistant-message"]'))
         .filter(candidate => candidate.closest("[data-streaming-response-status]") === null)
         .filter(rendered).at(-1)
       : undefined;
@@ -297,7 +297,7 @@ async function captureBrowserDiagnosticState(
           contentEditable: (element as HTMLElement).isContentEditable,
           focused: element === document.activeElement,
         })),
-        composerSelectedConnectors: scopedRows(composerForm, '[data-id^="plugin:"][data-keyword]', 20),
+        composerSelectedConnectors: scopedRows(composerForm, '[data-id^="plugin:"][data-keyword], [app-mention-display-name]', 20),
         mentionMenuConnectors: rows('.__menu-item[tabindex="0"][data-id^="plugin:"][data-keyword], .__menu-item[tabindex="0"] [data-id^="plugin:"][data-keyword]', 20),
       },
       focus: {
@@ -316,7 +316,7 @@ async function captureBrowserDiagnosticState(
           value: integerAttribute(element, "aria-valuenow"),
         })),
       menus: rows('[role="menu"], [role="listbox"], [data-testid="composer-intelligence-picker-content"]', 20),
-      connectorRows: rows('.__menu-item[tabindex="0"]', 40),
+      connectorRows: rows('.__menu-item[tabindex="0"], [data-list-navigation-item="true"]', 40),
       overlays: rows('[role="dialog"], [role="alert"], [role="status"]', 30),
       turns: {
         user: document.querySelectorAll(selectors.userTurn).length,
@@ -331,7 +331,7 @@ async function captureBrowserDiagnosticState(
           testId: element.getAttribute("data-testid"),
           textChars: (element.textContent ?? "").length,
           htmlChars: (element as HTMLElement).innerHTML.length,
-          markdownCount: element.querySelectorAll(".markdown").length,
+          markdownCount: element.querySelectorAll('.markdown, [data-markdown-text-style="assistant-message"]').length,
           streamingStatusCount: element.querySelectorAll("[data-streaming-response-status]").length,
           completionActionCount: element.querySelectorAll(selectors.completionAction).length,
           renderedCompletionActionCount: [...element.querySelectorAll(selectors.completionAction)]
