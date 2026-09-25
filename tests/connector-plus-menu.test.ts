@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker";
 import { openChatGptConnectorPlusMenu } from "../src/adapters/chatgpt-web/connector-plus-menu";
+import { CHATGPT_COMPOSER_PLUS_SELECTOR } from "../src/chatgpt-session";
 
 test("opens the connector plus menu and resolves one exact ARIA connector row", async () => {
   const calls: string[] = [];
@@ -10,8 +11,8 @@ test("opens the connector plus menu and resolves one exact ARIA connector row", 
     waitFor: async () => { calls.push("row:visible"); },
   };
   const page = {
-    getByTestId: (testId: string) => {
-      expect(testId).toBe("composer-plus-btn");
+    locator: (selector: string) => {
+      expect(selector).toBe(CHATGPT_COMPOSER_PLUS_SELECTOR);
       return {
         filter: (options: { visible: boolean }) => {
           expect(options).toEqual({ visible: true });
@@ -60,10 +61,9 @@ test("production connector selection uses the plus menu after a conclusive menti
     waitFor: async () => { calls.push("selected:visible"); },
   };
   const page = {
-    getByTestId: () => ({ filter: () => plus }),
     getByRole: () => ({ filter: () => row }),
     getByText: () => ({ exactConnectorLabel: true }),
-    locator: () => ({
+    locator: (selector: string) => selector === CHATGPT_COMPOSER_PLUS_SELECTOR ? { filter: () => plus } : ({
       filter: (options: { visible?: boolean }) => options.visible
         ? { count: async () => 0 }
         : { waitFor: async () => { throw timeout; } },
@@ -125,10 +125,11 @@ test("personalization proof falls back to the exact plus-menu connector after a 
     waitFor: async () => { calls.push("row:visible"); },
   };
   const page = {
-    getByTestId: () => ({ filter: () => plus }),
     getByRole: () => ({ filter: () => row }),
     getByText: () => ({}),
-    locator: () => ({ filter: () => ({ waitFor: async () => { throw timeout; } }) }),
+    locator: (selector: string) => selector === CHATGPT_COMPOSER_PLUS_SELECTOR
+      ? { filter: () => plus }
+      : { filter: () => ({ waitFor: async () => { throw timeout; } }) },
     keyboard: { press: async () => {} },
   };
   const selectConnector = (ChatGptBrowserWorker.prototype as unknown as {

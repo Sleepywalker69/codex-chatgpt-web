@@ -212,7 +212,7 @@ test("locates a bound assistant response exclusively by its stable public identi
     ordinal: 3,
     generation: 0,
   })).toBe(resolved);
-  expect(observedId).toBe('[data-turn-id="conversation-turn-9"]');
+  expect(observedId).toBe('[data-turn-id="conversation-turn-9"], [data-turn-key="conversation-turn-9"]');
 });
 
 test("keeps an attached response binding when historical turns are virtualized", () => {

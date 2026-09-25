@@ -2110,7 +2110,7 @@ export class ChatGptBrowserWorker {
               );
             }
             await this.clearChatGptComposerState(page);
-            const plusResult = typeof page.getByTestId === "function"
+            const plusResult = typeof page.locator === "function"
               ? await openChatGptConnectorPlusMenu(page, this.config.appName, personalizationSignal)
               : undefined;
             proofResult = plusResult !== undefined;
@@ -2202,7 +2202,7 @@ export class ChatGptBrowserWorker {
           abortSignal,
         );
         await this.clearChatGptComposerState(page);
-        const plusResult = typeof page.getByTestId === "function"
+        const plusResult = typeof page.locator === "function"
           ? await openChatGptConnectorPlusMenu(page, this.config.appName, abortSignal)
           : undefined;
         if (plusResult) {
@@ -3728,6 +3728,24 @@ export class ChatGptBrowserWorker {
         let responseTurnBinding: ChatGptAssistantTurnBinding | undefined;
         const completionTracker = new ChatGptCompletionTracker();
         let initialToolBatchRevision = 0;
+        // App-shell exchanges project their assistant half only once it has message content, and a
+        // tunneled turn writes no prose, so a native tool can arrive before any assistant turn can
+        // be bound. A batch recorded after this attempt's Send is causal proof of the submitted
+        // turn, and an unprojected turn has no answer to capture. Acknowledge it with an empty
+        // baseline rather than holding the batch until the MCP deadline retires its binding; no
+        // unbound (possibly historical) turn is read, and an empty post-tool answer stays rejected.
+        const acknowledgeUnprojectedToolBatch = async (): Promise<void> => {
+          const progress = turn.externalProgress?.snapshot();
+          if (!turn.externalProgress || !progress
+            || progress.lastToolBatchRevision <= initialToolBatchRevision
+            || !completionTracker.needsToolBatchObservation(progress.lastToolBatchRevision)) return;
+          // As on the bound path, cancellation must not release a batch waiting for this boundary.
+          turn.abortSignal?.throwIfAborted();
+          completionTracker.observeToolBatch(progress.lastToolBatchRevision, "");
+          console.info(`[chatgpt-web] browser turn ${turn.traceId} acknowledged tool boundary`
+            + ` revision=${progress.lastToolBatchRevision} before ChatGPT projected an assistant turn`);
+          await turn.externalProgress.acknowledgeToolBatch(progress.lastToolBatchRevision);
+        };
         let userTurns = page.locator(CHATGPT_USER_TURN_SELECTOR);
         const initialUserTurnCount = await userTurns.count();
         let submissionBaseline: ChatGptSubmissionBaseline = {
@@ -4064,9 +4082,16 @@ export class ChatGptBrowserWorker {
                     baseline.responsePresent ? baseline.visibleText : "");
                   await turn.externalProgress.acknowledgeToolBatch(progress.lastToolBatchRevision);
                 }
+              } else if (!responsePresent) {
+                await acknowledgeUnprojectedToolBatch();
               }
+              const initialTurns = new Set(initialResponseTurn.knownTurnIdentities ?? initialResponseTurn.identities ?? []);
               return {
                 responsePresent,
+                // An app-shell exchange identifies the submitted turn before, or without, an
+                // assistant half; the tunneled final needs only that identity and a stopped page.
+                submittedTurnPresent: responsePresent
+                  || (current.knownTurnIdentities ?? []).some(identity => !initialTurns.has(identity)),
                 running,
                 toolCallsInFlight: chatGptExternalToolCallsAreInFlight(turn.externalProgress?.snapshot()),
               };
@@ -4269,6 +4294,7 @@ export class ChatGptBrowserWorker {
         // An ordinal locator is live and can silently retarget a historical turn after ChatGPT DOM
         // virtualization. Do not inspect response content until the submitted turn has a stable ID.
         if (!responseTurnBinding) {
+          await acknowledgeUnprojectedToolBatch();
           await new Promise(resolveSleep => setTimeout(resolveSleep, 250));
           continue;
         }

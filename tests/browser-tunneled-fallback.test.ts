@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptExternalTurnProgress } from "../src/adapters/chatgpt-web/turn-progress";
 import { resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
-import { CHATGPT_ASSISTANT_TURN_SELECTOR, CHATGPT_COMPOSER_SELECTOR, CHATGPT_TEMPORARY_CHAT_URL } from "../src/chatgpt-session";
+import {
+  CHATGPT_ASSISTANT_TURN_SELECTOR, CHATGPT_COMPOSER_SELECTOR, CHATGPT_STOP_BUTTON_SELECTOR, CHATGPT_TEMPORARY_CHAT_URL,
+} from "../src/chatgpt-session";
+import { CHATGPT_TURN_IDENTITY_CONTAINER_SELECTOR } from "../src/adapters/chatgpt-web/response-turn-boundary";
 import type { BrokerTurnOutputEvent } from "../src/adapters/chatgpt-web/turn-broker-protocol";
 import { activeCompactionToolResultInstruction } from "../src/adapters/chatgpt-web/native-compaction-control";
 import { submitTurnOutput, waitForTurnOutput, sealTurnOutput, resetTurnOutput } from "../src/adapters/chatgpt-web/turn-broker-output";
@@ -24,6 +27,11 @@ async function runFixture(options: {
   emptyStopped?: boolean; recoveryFails?: boolean; composerBusy?: boolean; stoppedThinking?: boolean;
   composerBusyAfterAdmission?: boolean;
   recentToolProgress?: boolean;
+  // App-shell exchange: the submitted turn has an identity, but no assistant turn is projected
+  // until its tool round settles, or never for a tunneled turn that writes no prose.
+  assistantProjection?: "after-tool" | "never";
+  // Observe through the DOM loop instead of the output tunnel; stop once the tool has settled.
+  domPath?: boolean;
 } = {}) {
   const diagnostics = mkdtempSync(join(tmpdir(), "boole-browser-"));
   const progress = new ChatGptExternalTurnProgress();
@@ -60,6 +68,8 @@ async function runFixture(options: {
   let domWaits = 0;
   let lastToolResultAt = now;
   let fallbackAgeMs: number | undefined;
+  let assistantProjected = options.assistantProjection === undefined;
+  let deliverTunneledFinal: (() => void) | undefined;
   const acknowledge = progress.acknowledgeToolBatch.bind(progress);
   progress.acknowledgeToolBatch = async revision => {
     await acknowledge(revision);
@@ -70,11 +80,16 @@ async function runFixture(options: {
     progress.recordToolResult();
     lastToolResultAt = now;
     actions.push("tool-settled");
+    if (options.domPath) controller.abort();
     remainingBatches--;
     if (remainingBatches > 0) {
       text = "Intermediate review.";
       progress.recordToolBatch(1);
     } else if (!options.stale) text = options.emptyStopped ? "" : FINAL;
+    if (remainingBatches === 0 && options.assistantProjection) {
+      assistantProjected = options.assistantProjection === "after-tool";
+      deliverTunneledFinal?.();
+    }
   };
   const hidden: any = {
     count: async () => 0, isVisible: async () => false,
@@ -94,7 +109,8 @@ async function runFixture(options: {
         text = FINAL;
         pendingResult = false;
       }
-      const identities = ["historical", ...Array.from({ length: submitted }, (_, index) => `current${index || ""}`)];
+      const identities = ["historical", ...Array.from({ length: submitted }, (_, index) => `current${index || ""}`)]
+        .filter(identity => assistantProjected || identity === "historical");
       return { count: identities.length, lastId: identities.at(-1), identities };
     },
   };
@@ -102,10 +118,18 @@ async function runFixture(options: {
     isClosed: () => false, url: () => CHATGPT_TEMPORARY_CHAT_URL, evaluate: async () => ({}),
     locator: (selector: string) => {
       if (selector === CHATGPT_ASSISTANT_TURN_SELECTOR) return turns;
-      if (selector === "[data-turn-id-container]") return {
+      if (selector === CHATGPT_TURN_IDENTITY_CONTAINER_SELECTOR) return {
         evaluateAll: async () => ["historical", ...Array.from({ length: submitted }, (_, index) => `current${index || ""}`)],
       };
       if (selector.startsWith('[data-turn-id="current')) return response;
+      // Cancellation lands on the last probe before an unprojected turn acknowledges its batch.
+      if (selector === CHATGPT_STOP_BUTTON_SELECTOR && options.abortAtBaseline && options.assistantProjection) return {
+        ...hidden,
+        last: () => ({ isVisible: async () => {
+          if (progress.snapshot().activeToolCalls) controller.abort();
+          return false;
+        } }),
+      };
       if (selector === CHATGPT_COMPOSER_SELECTOR) return {
         ...hidden, count: async () => 1, textContent: async () => composerText,
       };
@@ -136,7 +160,7 @@ async function runFixture(options: {
       if (options.composerBusyAfterAdmission && actions.includes("recovery:eligible")) composerText = "User draft";
       return { textContent: async () => composerText,
         fill: async () => { composerText = ""; actions.push("clear"); }, focus: async () => {},
-        locator: () => ({ getByTestId: () => ({
+        locator: () => ({ locator: () => ({
       waitFor: async () => {}, isEnabled: async () => true,
       press: async () => {
         submitted++;
@@ -149,7 +173,10 @@ async function runFixture(options: {
         actions.push("send");
       },
     }) }) }; },
-    waitForSubmissionAccepted: async () => "generation_running",
+    waitForSubmissionAccepted: async () => {
+      if (options.domPath && !batch) batch = progress.recordToolBatch(1);
+      return "generation_running";
+    },
     responseDomSnapshot: async (locator: unknown) => {
       expect(locator).toBe(response);
       if (progress.snapshot().activeToolCalls) snapshotsBeforeDispatch++;
@@ -205,12 +232,22 @@ async function runFixture(options: {
             text: options.tunneledRetry && finalSequence === 1 ? "Superseded review." : FINAL });
         }
         if (!batch && !options.tunneledFinal) batch = progress.recordToolBatch(1);
-        return new Promise<BrokerTurnOutputEvent>((_resolve, reject) => {
+        return new Promise<BrokerTurnOutputEvent>((resolve, reject) => {
           pendingReaders++;
-          signal!.addEventListener("abort", () => {
+          let deliver: (() => void) | undefined;
+          const onAbort = () => {
+            if (deliverTunneledFinal === deliver) deliverTunneledFinal = undefined;
             pendingReaders--;
             reject(new DOMException("aborted", "AbortError"));
-          }, { once: true });
+          };
+          signal!.addEventListener("abort", onAbort, { once: true });
+          // The model reports its final through the tunnel once its tool round has settled.
+          if (options.assistantProjection && after < finalSequence) deliverTunneledFinal = deliver = () => {
+            deliverTunneledFinal = undefined;
+            signal!.removeEventListener("abort", onAbort);
+            pendingReaders--;
+            resolve({ sequence: finalSequence, kind: "final", text: FINAL });
+          };
         });
       },
       reset: async sequence => {
@@ -227,6 +264,7 @@ async function runFixture(options: {
       },
     },
   };
+  if (options.domPath) delete turn.tunneledOutput;
   let answer: string | undefined;
   let error: unknown;
   try { answer = await worker.runBrowserTurn(turn, undefined, page, options.retained); }
@@ -395,6 +433,44 @@ test("an identified current turn may use an empty baseline before its first nati
   expect(result.actions).toContain("tool-dispatched");
   expect(result.answer).toBe(FINAL);
   expect(result.deltas).toEqual([FINAL]);
+});
+
+test.each(["after-tool", "never"] as const)("an app-shell turn dispatches its first native tool before an assistant turn is projected (%s)", async assistantProjection => {
+  const result = await runFixture({ assistantProjection });
+  expect(result.error).toBeUndefined();
+  expect(result.actions).toContain("tool-dispatched");
+  expect(result.answer).toBe(FINAL);
+  expect(result.deltas).toEqual([FINAL]);
+  // The empty baseline never reads an unbound, possibly historical, turn.
+  expect(result.actions.some(action => action.startsWith("snapshot:"))).toBeFalse();
+  expect(result.actions.filter(action => action === "fence-commit")).toHaveLength(1);
+  expect(result.logs.some(line => line.includes("info:") && line.includes("before ChatGPT projected an assistant turn"))).toBeTrue();
+});
+
+test("the DOM observation loop dispatches a native tool before an assistant turn can be bound", async () => {
+  const result = await runFixture({ assistantProjection: "never", domPath: true });
+  // The fixture stops the turn after the tool settles; dispatch is the property under test.
+  expect(result.error).toMatchObject({ name: "AbortError" });
+  expect(result.actions).toContain("tool-dispatched");
+  expect(result.actions).toContain("tool-settled");
+  expect(result.snapshotsBeforeDispatch).toBe(0);
+  expect(result.actions.some(action => action.startsWith("snapshot:"))).toBeFalse();
+  expect(result.logs.some(line => line.includes("info:") && line.includes("before ChatGPT projected an assistant turn"))).toBeTrue();
+});
+
+test("cancellation before an unprojected acknowledgement cannot release a waiting tool batch", async () => {
+  const result = await runFixture({ assistantProjection: "never", abortAtBaseline: true });
+  expect(result.error).toMatchObject({ name: "AbortError" });
+  expect(result.actions).not.toContain("tool-dispatched");
+  expect(result.deltas).toEqual([]);
+});
+
+test("an unprojected turn never acknowledges a tool batch recorded before its Send", async () => {
+  const result = await runFixture({ assistantProjection: "never", pastToolBatch: true, tunneledFinal: true });
+  expect(result.error).toBeUndefined();
+  expect(result.answer).toBe(FINAL);
+  expect(result.actions).not.toContain("tool-dispatched");
+  expect(result.logs.some(line => line.includes("before ChatGPT projected an assistant turn"))).toBeFalse();
 });
 
 test("a visible completed answer after a settled native tool does not wait for the 60s progress grace", async () => {

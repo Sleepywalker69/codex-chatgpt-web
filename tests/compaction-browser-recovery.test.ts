@@ -64,7 +64,7 @@ test.each([
     activeComposer: async () => ({
       fill: async () => {}, focus: async () => {}, pressSequentially: async () => {},
       press: async () => { actions.push("connector-select"); selected = true; },
-      locator: () => ({ getByTestId: () => ({
+      locator: () => ({ locator: () => ({
       waitFor: async () => {}, isEnabled: async () => true, press: async () => {
         actions.push("send");
         if (cancellationCase) {

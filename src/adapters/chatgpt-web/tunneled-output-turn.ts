@@ -9,7 +9,13 @@ export interface ChatGptTunneledOutputReader {
   seal(afterSequence: number, expectedRevision: number): Promise<boolean>;
 }
 
-interface TunnelObservation { running: boolean; responsePresent: boolean; toolCallsInFlight?: boolean }
+interface TunnelObservation {
+  running: boolean;
+  responsePresent: boolean;
+  /** The submitted turn is identified even though no assistant turn has been projected. */
+  submittedTurnPresent?: boolean;
+  toolCallsInFlight?: boolean;
+}
 
 interface TunnelOptions {
   output: ChatGptTunneledOutputReader;
@@ -135,7 +141,12 @@ export async function runChatGptTunneledOutputTurn(options: TunnelOptions): Prom
         }
         continue;
       }
-      if (!observed.responsePresent || observed.running) { fenceRevision = undefined; continue; }
+      // The final already arrived through the tunnel, so an identified submitted turn is enough DOM
+      // evidence; a tunneled app-shell turn without prose may never project an assistant half.
+      if (!(observed.responsePresent || observed.submittedTurnPresent) || observed.running) {
+        fenceRevision = undefined;
+        continue;
+      }
       if (options.completionFence && fenceRevision === undefined) {
         fenceRevision = await options.completionFence.begin();
         continue;

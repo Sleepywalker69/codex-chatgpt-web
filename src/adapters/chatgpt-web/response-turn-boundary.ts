@@ -19,6 +19,9 @@ export type ChatGptSubmissionEvidence =
   | "generation_running"
   | "mcp_tool_call";
 
+/** Stable conversation-turn identities: legacy per-message containers and app-shell exchanges. */
+export const CHATGPT_TURN_IDENTITY_CONTAINER_SELECTOR = "[data-turn-id-container], [data-turn-key]";
+
 export class ChatGptTurnIdentityAmbiguityError extends Error {
   constructor(scope: "assistant" | "conversation") {
     super(`ChatGPT ${scope} turn identities are ambiguous`);
@@ -58,7 +61,7 @@ export async function readChatGptAssistantTurnState(
   const page = (turns as unknown as Partial<Pick<Locator, "page">>).page?.();
   if (!page) return stableState;
   const knownTurnIdentities = await readChatGptTurnIdentities(
-    page.locator("[data-turn-id-container], [data-turn-key]"), "data-turn-id-container",
+    page.locator(CHATGPT_TURN_IDENTITY_CONTAINER_SELECTOR), "data-turn-id-container",
   );
   const known = new Set(knownTurnIdentities);
   if (stableState.identities.some(identity => !known.has(identity))) {

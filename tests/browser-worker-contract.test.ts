@@ -20,6 +20,8 @@ function personalizedTemporaryChatRole(
   };
   return locator;
 }
+// An app-shell composer can expose no plus control; connector selection must then fail closed.
+const absentComposerPlusControl = { filter: () => ({ count: async () => 0 }) };
 import { ChatGptSubmissionRejectionObserver, CHATGPT_COMPLETION_SETTLE_MS } from "../src/adapters/chatgpt-web/browser-worker";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
 import { expect, spyOn, test } from "bun:test";
@@ -134,7 +136,7 @@ test("browser turn orchestration retains owned prompt insertion and semantic sub
   const runBrowserTurn = workerSource.slice(workerSource.indexOf("  private async runBrowserTurn("));
   expect(runBrowserTurn).toContain("this.attachPromptWithCompactionRetry(");
   expect(runBrowserTurn).toContain('.locator("xpath=ancestor::form[1]")');
-  expect(runBrowserTurn).toContain('.getByTestId("send-button")');
+  expect(runBrowserTurn).toContain(".locator(CHATGPT_SEND_BUTTON_SELECTOR)");
   expect(runBrowserTurn).toContain("await activateChatGptSendControl(sendButton, stageSignal)");
   expect(runBrowserTurn.indexOf("turn.onSendActivated?.()"))
     .toBeGreaterThanOrEqual(0);
@@ -934,7 +936,7 @@ test("connector selection resolves a selected pill from the owning composer form
   const selectedConnector = {};
   const composerForm = {
     locator: (selector: string) => {
-      expect(selector).toBe('[data-id^="plugin:"][data-keyword="Codex Native2"]');
+      expect(selector).toBe(accountSession.chatGptSelectedConnectorSelector("Codex Native2"));
       return {
         filter: (options: { visible: boolean }) => {
           expect(options).toEqual({ visible: true });
@@ -1145,7 +1147,8 @@ test("connector verification preserves the host-refreshed catalog evidence", asy
     getByRole: personalizedTemporaryChatRole,
     reload: async () => { calls.push("reload"); },
     getByText: () => ({ exactConnectorLabel: true }),
-    locator: () => menuRows,
+    locator: (selector: string) => selector === accountSession.CHATGPT_COMPOSER_PLUS_SELECTOR
+      ? absentComposerPlusControl : menuRows,
     evaluate: async () => ({
       url: "https://chatgpt.com/?temporary-chat=true",
       title: "ChatGPT",
@@ -1353,7 +1356,7 @@ test("connector catalog refresh stays fail-closed for absent, legacy, and exact 
       url: () => "https://chatgpt.com/?temporary-chat=true",
     getByRole: personalizedTemporaryChatRole,
       getByText: () => ({ exactConnectorLabel: true }),
-      locator: () => ({
+      locator: (selector: string) => selector === accountSession.CHATGPT_COMPOSER_PLUS_SELECTOR ? absentComposerPlusControl : ({
         filter: (options: { has?: unknown; visible?: boolean }) => options.visible
           ? { allInnerTexts: async () => visibleRows }
           : {
@@ -1497,8 +1500,8 @@ test("image attachment readiness uses exact file tiles and not localized remove-
         },
       };
     },
-    getByTestId: (testId: string) => {
-      expect(testId).toBe("send-button");
+    locator: (selector: string) => {
+      expect(selector).toBe(accountSession.CHATGPT_SEND_BUTTON_SELECTOR);
       return send;
     },
   };
@@ -2610,7 +2613,7 @@ test("visible DOM trace emits one complete commentary paragraph before the next 
 
 test("response DOM separates streaming commentary from the final Markdown answer", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
-  expect(workerSource).toContain("const answerRootSelector = '.markdown, [data-message-author-role=\"assistant\"] .puik-root.not-markdown > [class*=\"_DilResponseRoot\"]'");
+  expect(workerSource).toContain("const answerRootSelector = '.markdown, [data-message-author-role=\"assistant\"] .puik-root.not-markdown > [class*=\"_DilResponseRoot\"], [data-markdown-text-style=\"assistant-message\"]'");
   expect(workerSource).toContain("const allMarkdownRoots = [...root.querySelectorAll<HTMLElement>(answerRootSelector)]");
   expect(workerSource).toContain("const selectChatGptAnswerRoots = (");
   expect(workerSource).toContain('candidate.closest("[data-streaming-response-status]") !== null');
@@ -3287,7 +3290,9 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
   const controls: any = { filter: () => controls, count: async () => 1, first: () => control };
   const sendButton = { waitFor: async () => {}, isEnabled: async () => true,
     press: async () => { sends++; } };
-  const composer = { locator: () => ({ locator: () => controls, getByTestId: () => sendButton }),
+  const composer = { locator: () => ({
+    locator: (selector: string) => selector === accountSession.CHATGPT_SEND_BUTTON_SELECTOR ? sendButton : controls,
+  }),
     isEditable: async () => true };
   const page = Object.assign(new EventEmitter(), {
     url: () => url, isClosed: () => false,

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { CHATGPT_EFFORT_MENU_SELECTOR } from "../src/chatgpt-session";
 
 test("effort selection uses structural menu and slider indices instead of localized labels", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
@@ -7,8 +8,9 @@ test("effort selection uses structural menu and slider indices instead of locali
   expect(workerSource).toContain("mode.uiEffortIndex");
   expect(workerSource).toContain("CHATGPT_EFFORT_MENU_SELECTOR");
   expect(workerSource).toContain("CHATGPT_EFFORT_ITEM_SELECTOR");
-  expect(sessionSource).toContain('[role="menu"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider])');
-  expect(sessionSource).toContain('[role="group"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider])');
+  // Markers are structural; the app-shell Power slider joins the legacy effort slider.
+  expect(CHATGPT_EFFORT_MENU_SELECTOR).toContain('[role="menu"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider]');
+  expect(CHATGPT_EFFORT_MENU_SELECTOR).toContain('[role="group"]:has([role="menuitemradio"], [data-model-reasoning-effort-slider]');
   expect(sessionSource).toContain('[role="menuitemradio"]');
   expect(sessionSource).toContain('[data-model-reasoning-effort-slider] [role="slider"]');
   expect(sessionSource).not.toContain(":popover-open");
