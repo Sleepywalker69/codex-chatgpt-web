@@ -19,7 +19,7 @@ type FakeComposer = {
 
 function fakeLexicalComposer(acceptEdit = true, onEdit?: () => void, rejectLargeText = false): FakeComposer {
   const { createDocument } = require("@mixmark-io/domino") as { createDocument: (html: string) => Document };
-  const document = createDocument('<div id="composer"></div>') as Document & {
+  const document = createDocument('<div id="composer" contenteditable="true" data-lexical-editor="true"></div>') as Document & {
     createRange(): Range;
     execCommand(command: string, showUi: boolean, value?: string): boolean;
   };
@@ -150,10 +150,10 @@ test("keeps multiline HTML-like input, entities, whitespace and empty lines lite
 
 test("removes the empty ProseMirror paragraph created before a pre-wrapped block", async () => {
   const { createDocument } = require("@mixmark-io/domino") as { createDocument: (html: string) => Document };
-  const document = createDocument('<div id="composer"><p></p></div>') as Document & {
+  const document = createDocument('<div id="prompt-textarea"><p></p></div>') as Document & {
     execCommand(command: string, showUi: boolean, value?: string): boolean;
   };
-  const element = document.getElementById("composer")!;
+  const element = document.getElementById("prompt-textarea")!;
   const commands: string[] = [];
   let selectedNode: Node | undefined;
   document.createRange = () => ({ selectNode: (node: Node) => { selectedNode = node; } }) as Range;
@@ -192,44 +192,103 @@ test("removes the empty ProseMirror paragraph created before a pre-wrapped block
   }
 });
 
-test("a pre-wrapped prompt after an app-shell connector mention verifies exactly", async () => {
+type AppShellComposer = {
+  document: Document;
+  element: HTMLElement;
+  commands: string[];
+  fragments: Element[][];
+  selection: object;
+};
+
+/** The app-shell ProseMirror: a LF inside an inserted paragraph parses as a space. */
+function fakeAppShellComposer(paragraphHtml: string, retainPlaceholder = false): AppShellComposer {
   const { createDocument } = require("@mixmark-io/domino") as { createDocument: (html: string) => Document };
-  // The app-shell editor leaves one separator space after a freshly selected connector mention.
   const document = createDocument(
-    '<div id="composer"><p><span app-mention-display-name="Codex Native2" contenteditable="false">@Codex Native2</span> </p></div>',
+    `<form data-chatgpt-composer><div id="composer" contenteditable="true" role="textbox">${paragraphHtml}</div></form>`,
   ) as Document & { execCommand(command: string, showUi: boolean, value?: string): boolean };
   const element = document.getElementById("composer")!;
-  const paragraph = element.firstChild!;
   const commands: string[] = [];
+  const fragments: Element[][] = [];
+  let selectedNode: Node | undefined;
+  document.createRange = () => ({ selectNode: (node: Node) => { selectedNode = node; } }) as Range;
   document.execCommand = (command, _showUi, value = "") => {
     commands.push(command);
+    if (command === "delete" && selectedNode?.parentNode === element) {
+      element.removeChild(selectedNode);
+      return true;
+    }
     if (command !== "insertHTML") return false;
-    // A caret after inline content merges the single inserted paragraph into the current one.
-    paragraph.lastChild!.textContent += createDocument(`<body>${value}</body>`).body.firstElementChild?.textContent ?? "";
+    const blocks = Array.from(createDocument(`<body>${value}</body>`).body.children);
+    fragments.push(blocks);
+    const lines = blocks.map(block => (block.textContent ?? "").replaceAll("\n", " "));
+    // The first block merges into the caret's paragraph unless the editor keeps an empty placeholder.
+    const caret = element.lastChild!;
+    if (!(retainPlaceholder && caret.textContent === "")) caret.appendChild(document.createTextNode(lines.shift() ?? ""));
+    for (const line of lines) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = line;
+      element.appendChild(paragraph);
+    }
     return true;
   };
   Object.defineProperty(document, "activeElement", { configurable: true, get: () => element });
-  const selection = { isCollapsed: true, get anchorNode() { return paragraph.lastChild; },
-    get focusNode() { return paragraph.lastChild; }, removeAllRanges() {}, addRange() {} };
+  const selection = { isCollapsed: true, get anchorNode() { return element.lastChild; },
+    get focusNode() { return element.lastChild; }, removeAllRanges() {}, addRange() {} };
+  return { document, element, commands, fragments, selection };
+}
+
+async function insertIntoAppShell(editor: AppShellComposer, text: string): Promise<string[]> {
   const previous = { document: globalThis.document, window: globalThis.window };
-  Object.assign(globalThis, { document, window: { getSelection: () => selection } });
-  // attachPrompt inserts its own separator before the prompt on a connector turn.
-  const insertion = ` ${"compaction line <b>&\n".repeat(2_000)}end`;
+  Object.assign(globalThis, { document: editor.document, window: { getSelection: () => editor.selection } });
   const verified: string[] = [];
   try {
-    await insertChatGptPromptText(insertion, undefined, {
-      composer: async () => ({ focus: async () => {}, evaluate: async (callback: Function, input: unknown) => callback(element, input) }) as never,
+    await insertChatGptPromptText(text, undefined, {
+      composer: async () => ({ focus: async () => {}, evaluate: async (callback: Function, input: unknown) => callback(editor.element, input) }) as never,
       verify: async expected => {
-        expect(readChatGptPromptText(element, { preserveLeading: true }) === expected).toBeTrue();
-        verified.push(expected === "" ? "empty" : expected === insertion ? "inserted" : "other");
+        expect(readChatGptPromptText(editor.element, { preserveLeading: true }) === expected).toBeTrue();
+        verified.push(expected === "" ? "empty" : expected === text ? "inserted" : "other");
       },
       reanchor: async () => {},
     }, { largeStructuredDirect: true });
-    expect(commands).toEqual(["insertHTML"]);
-    expect(verified).toEqual(["empty", "inserted", "inserted"]);
+    return verified;
   } finally {
     Object.assign(globalThis, previous);
   }
+}
+
+const APP_SHELL_MENTION = '<p><span app-mention-display-name="Codex Native2" contenteditable="false">@Codex Native2</span> </p>';
+
+test("an app-shell composer takes one pre-wrapped paragraph per line after a connector mention", async () => {
+  // One pre-wrapped paragraph loses its LFs here: the live compaction failure.
+  const legacyShape = fakeAppShellComposer(APP_SHELL_MENTION);
+  legacyShape.document.execCommand("insertHTML", false, '<p style="white-space:pre-wrap"> first\nsecond</p>');
+  expect(readChatGptPromptText(legacyShape.element, { preserveLeading: true })).toBe(" first second");
+
+  const editor = fakeAppShellComposer(APP_SHELL_MENTION);
+  // attachPrompt inserts its own separator before the prompt on a connector turn.
+  const insertion = ` header\n\n  indented <b>&amp;\n${"compaction line <tag> & *x*\n".repeat(2_000)}\t\nend\n`;
+  expect(await insertIntoAppShell(editor, insertion)).toEqual(["empty", "inserted", "inserted"]);
+  expect(editor.commands).toEqual(["insertHTML"]);
+  const blocks = editor.fragments[0]!;
+  expect(blocks.length).toBe(insertion.split("\n").length);
+  expect(blocks.every(block => block.tagName === "P" && block.getAttribute("style") === "white-space:pre-wrap"
+    && [...block.querySelectorAll("*")].every(child => child.tagName === "BR"))).toBeTrue();
+});
+
+test("an app-shell placeholder paragraph is removed only when it is a surplus block", async () => {
+  const text = `${"x".repeat(40_000)}\nlast`;
+  const retained = fakeAppShellComposer("<p></p>", true);
+  expect(await insertIntoAppShell(retained, text)).toEqual(["empty", "inserted", "inserted"]);
+  expect(retained.commands).toEqual(["insertHTML", "delete"]);
+
+  // An empty first line is prompt text once it has merged into the placeholder.
+  const leadingBlank = `\n${"x".repeat(40_000)}`;
+  const merged = fakeAppShellComposer("<p></p>");
+  expect(await insertIntoAppShell(merged, leadingBlank)).toEqual(["empty", "inserted", "inserted"]);
+  expect(merged.commands).toEqual(["insertHTML"]);
+  const surplus = fakeAppShellComposer("<p></p>", true);
+  expect(await insertIntoAppShell(surplus, leadingBlank)).toEqual(["empty", "inserted", "inserted"]);
+  expect(surplus.commands).toEqual(["insertHTML", "delete"]);
 });
 
 test("escapes one-line HTML-like input in the native fragment", async () => {

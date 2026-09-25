@@ -67,7 +67,8 @@ export function planChatGptPromptInsertion(
   // Preserve the direct inline route; the candidate replaces only large guarded work.
   const candidate = options?.candidatePlainText === true && !legacyDirect && text.length > DIRECT_INSERT_MIN_CHARS;
   const direct = candidate || legacyDirect;
-  // One pre-wrapped paragraph avoids the extra LF created by one HTML block per line.
+  // Pre-wrapped HTML keeps whitespace literal: one paragraph on legacy composers, where a block per
+  // line added an LF, and one per line on the app-shell composer, which parses an inner LF as a space.
   // HTML parsing changes CR, NUL and lone surrogates; preserve the native text route for them.
   const strategy: ChatGptPromptInsertionStrategy = !direct
     ? "guarded-chunked"

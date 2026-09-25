@@ -7,10 +7,14 @@ export const CHATGPT_SAVED_CHAT_URL = "https://chatgpt.com/";
 export function chatGptNewChatUrl(useSavedChats = false): string {
   return useSavedChats ? CHATGPT_SAVED_CHAT_URL : CHATGPT_TEMPORARY_CHAT_URL;
 }
-export const CHATGPT_COMPOSER_SELECTOR = [
+/** Pre-app-shell composers: they keep LF inside one pre-wrapped paragraph of inserted HTML. */
+export const CHATGPT_LEGACY_COMPOSER_SELECTOR = [
   '[data-testid="prompt-textarea"]',
   "#prompt-textarea",
   '[contenteditable="true"][data-lexical-editor="true"]',
+].join(", ");
+export const CHATGPT_COMPOSER_SELECTOR = [
+  CHATGPT_LEGACY_COMPOSER_SELECTOR,
   // App-shell composer (2026-09-24): a bare ProseMirror textbox owned by the composer form,
   // with no test id or element id.
   'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]',

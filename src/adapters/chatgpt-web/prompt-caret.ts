@@ -4,6 +4,7 @@ import { chatGptNativeEditValue, type ChatGptPromptInsertionMetrics } from "./pr
 import type { Locator } from "playwright-core";
 import { chatGptWebSurfaceError, ChatGptPromptIntegrityMismatchError } from "./adapter-error";
 import { CHATGPT_PROMPT_MARKDOWN_DELIMITERS as MARKDOWN_SHORTCUT_DELIMITERS } from "./prompt-insertion-plan";
+import { CHATGPT_LEGACY_COMPOSER_SELECTOR } from "../../chatgpt-session";
 
 export interface ChatGptCaretEvidence {
   collapsed: boolean;
@@ -318,15 +319,24 @@ export async function insertChatGptComposerGuardedText(
     }
     if (typeof input !== "string") {
       const escape = (part: string) => part.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-      const html = input.prewrap
-        ? `<p style="white-space:pre-wrap">${escape(value)}</p>`
-        : value.split("\n").map(line => `<div>${escape(line) || "<br>"}</div>`).join("");
+      // The legacy composers keep LF inside one pre-wrapped paragraph. The app-shell ProseMirror
+      // parses that LF as a space, so it takes one pre-wrapped paragraph per line, as typed text does.
+      const lines = input.prewrap && input.legacyComposer && !element.matches(input.legacyComposer)
+        ? value.split("\n")
+        : undefined;
+      const html = lines
+        ? lines.map(line => `<p style="white-space:pre-wrap">${escape(line) || "<br>"}</p>`).join("")
+        : input.prewrap
+          ? `<p style="white-space:pre-wrap">${escape(value)}</p>`
+          : value.split("\n").map(line => `<div>${escape(line) || "<br>"}</div>`).join("");
       if (!edit("insertHTML", html)) return result(false);
       // ProseMirror may retain its empty placeholder paragraph ahead of an inserted block.
       // Remove it through a native edit so the editor model and the visible DOM agree.
+      // Per-line paragraphs leave a placeholder only as one surplus block; an empty first line is text.
       const first = element.childNodes[0];
       const second = element.childNodes[1];
-      if (input.prewrap && first?.nodeName === "P" && first.textContent === "" && second?.nodeName === "P") {
+      if (input.prewrap && first?.nodeName === "P" && first.textContent === "" && second?.nodeName === "P"
+        && (!lines || element.childNodes.length > lines.length)) {
         const range = document.createRange();
         range.selectNode(first);
         selection.removeAllRanges();
@@ -336,7 +346,9 @@ export async function insertChatGptComposerGuardedText(
       return result(true);
     }
     return result(edit("insertText", value));
-  }, htmlShape ? htmlShape === "prewrap" ? { text, prewrap: true } : { text } : text, options);
+  }, htmlShape
+    ? htmlShape === "prewrap" ? { text, prewrap: true, legacyComposer: CHATGPT_LEGACY_COMPOSER_SELECTOR } : { text }
+    : text, options);
   });
   const inserted = chatGptNativeEditValue(editResult, metrics);
   if (!inserted && recoverCaret && editResult !== null && typeof editResult === "object"
