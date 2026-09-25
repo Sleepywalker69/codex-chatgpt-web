@@ -192,6 +192,46 @@ test("removes the empty ProseMirror paragraph created before a pre-wrapped block
   }
 });
 
+test("a pre-wrapped prompt after an app-shell connector mention verifies exactly", async () => {
+  const { createDocument } = require("@mixmark-io/domino") as { createDocument: (html: string) => Document };
+  // The app-shell editor leaves one separator space after a freshly selected connector mention.
+  const document = createDocument(
+    '<div id="composer"><p><span app-mention-display-name="Codex Native2" contenteditable="false">@Codex Native2</span> </p></div>',
+  ) as Document & { execCommand(command: string, showUi: boolean, value?: string): boolean };
+  const element = document.getElementById("composer")!;
+  const paragraph = element.firstChild!;
+  const commands: string[] = [];
+  document.execCommand = (command, _showUi, value = "") => {
+    commands.push(command);
+    if (command !== "insertHTML") return false;
+    // A caret after inline content merges the single inserted paragraph into the current one.
+    paragraph.lastChild!.textContent += createDocument(`<body>${value}</body>`).body.firstElementChild?.textContent ?? "";
+    return true;
+  };
+  Object.defineProperty(document, "activeElement", { configurable: true, get: () => element });
+  const selection = { isCollapsed: true, get anchorNode() { return paragraph.lastChild; },
+    get focusNode() { return paragraph.lastChild; }, removeAllRanges() {}, addRange() {} };
+  const previous = { document: globalThis.document, window: globalThis.window };
+  Object.assign(globalThis, { document, window: { getSelection: () => selection } });
+  // attachPrompt inserts its own separator before the prompt on a connector turn.
+  const insertion = ` ${"compaction line <b>&\n".repeat(2_000)}end`;
+  const verified: string[] = [];
+  try {
+    await insertChatGptPromptText(insertion, undefined, {
+      composer: async () => ({ focus: async () => {}, evaluate: async (callback: Function, input: unknown) => callback(element, input) }) as never,
+      verify: async expected => {
+        expect(readChatGptPromptText(element, { preserveLeading: true }) === expected).toBeTrue();
+        verified.push(expected === "" ? "empty" : expected === insertion ? "inserted" : "other");
+      },
+      reanchor: async () => {},
+    }, { largeStructuredDirect: true });
+    expect(commands).toEqual(["insertHTML"]);
+    expect(verified).toEqual(["empty", "inserted", "inserted"]);
+  } finally {
+    Object.assign(globalThis, previous);
+  }
+});
+
 test("escapes one-line HTML-like input in the native fragment", async () => {
   const prompt = '<script>throw 1</script> &amp; <img src=x onerror="throw 1"> '.repeat(700);
   const editor = await insertWithFakeEditor(prompt, false, true);

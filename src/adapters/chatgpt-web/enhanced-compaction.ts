@@ -19,7 +19,7 @@ import type { TurnBroker } from "./turn-broker";
 import { chatGptConversationKey, chatGptTurnExecutionKey, chatGptTurnSessions, type ChatGptTurnSession } from "./turn-execution";
 import { emitBrowserCompletion } from "./turn-events";
 import { estimateChatGptWebUsage } from "./usage";
-import { extractChatGptTurnIdentity } from "./environment";
+import { extractChatGptCompactionSourceRevision, extractChatGptTurnIdentity } from "./environment";
 
 interface EnhancedCompactionOptions {
   worker: Pick<ChatGptBrowserWorker, "run"> & Partial<Pick<ChatGptBrowserWorker, "requestPreemptiveRetry">>;
@@ -34,6 +34,25 @@ interface EnhancedCompactionOptions {
   requireAutomaticAdmission?: (traceId: string) => void;
   startFallback: (traceId: string, signal: AbortSignal, onProgress: () => void, retainOwnershipUntil: (settlement: Promise<void>) => void) => Promise<string>;
   emit: (event: AdapterEvent) => void;
+}
+
+/** A missing source forces the fresh-chat fallback; record which execution-key input diverged. */
+function logRetainedCompactionSourceMiss(
+  parsed: CodexParsedRequest,
+  identity: ReturnType<typeof extractChatGptTurnIdentity>,
+): void {
+  let historyTurnId: string | undefined;
+  try { historyTurnId = extractChatGptCompactionSourceRevision(parsed).turnId; } catch { /* diagnostics only */ }
+  const sourceTurnId = historyTurnId ?? identity.turnId;
+  console.warn(`[chatgpt-web] retained compaction source not found ${JSON.stringify({
+    model: parsed.modelId,
+    family: parsed._chatgptModelFamily ?? null,
+    reasoning: parsed.options.reasoning ?? null,
+    sourceTurn: historyTurnId === undefined || historyTurnId === identity.turnId ? "request" : "history",
+    liveSessionsForSourceTurn: identity.threadId && sourceTurnId
+      ? chatGptTurnSessions.nativeTurnSessionShapes(identity.threadId, sourceTurnId)
+      : null,
+  })}`);
 }
 
 export async function runEnhancedCompaction(
@@ -102,6 +121,7 @@ export async function runEnhancedCompaction(
       preserveFinal = !source?.isActive() && source?.settledOutcome()?.type === "final";
       const conversationKey = source?.conversationKey();
       if (!source || !conversationKey) {
+        if (!source) logRetainedCompactionSourceMiss(parsed, identity);
         if (source) await withCompactionAbort(
           chatGptTurnSessions.retireAndWait(responseExecutionKey), operationSignal,
         );

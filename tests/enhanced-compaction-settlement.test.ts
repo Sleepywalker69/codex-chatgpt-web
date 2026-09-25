@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { runEnhancedCompaction } from "../src/adapters/chatgpt-web/enhanced-compaction";
 import { CHATGPT_WEB_MODEL_ID } from "../src/adapters/chatgpt-web/model";
@@ -122,6 +122,27 @@ for (const sameExecutionKey of [true, false]) test(`enhanced compact waits for d
     await expect(run).resolves.toBe("completed");
     expect(fallbackStarted).toBe(true);
   } finally { await f.cleanup(); await run.catch(() => {}); }
+});
+
+test("a compaction that cannot find its source logs how the live source turn was keyed", async () => {
+  const f = fixture();
+  await f.source.browserOutcome;
+  // The live source ran at a different effort than the compaction request carries.
+  f.source.runtime.nativeIdentity = { threadId: f.key, turnId: "source-turn" };
+  f.source.runtime.usageInput = { ...f.options.parsed, options: { reasoning: "xhigh" } };
+  const warnings: string[] = [];
+  const warn = spyOn(console, "warn").mockImplementation(message => { warnings.push(String(message)); });
+  try {
+    await expect(runEnhancedCompaction({ ...f.options, responseExecutionKey: `${f.key}:other-effort` }))
+      .resolves.toBe("completed");
+  } finally { warn.mockRestore(); await f.cleanup(); }
+  const line = warnings.find(message => message.includes("retained compaction source not found"));
+  expect(line).toBeDefined();
+  expect(JSON.parse(line!.slice(line!.indexOf("{")))).toEqual({
+    model: CHATGPT_WEB_MODEL_ID, family: null, reasoning: "medium", sourceTurn: "history",
+    liveSessionsForSourceTurn: [{ model: CHATGPT_WEB_MODEL_ID, family: null, reasoning: "xhigh" }],
+  });
+  expect(warnings).toContain("[chatgpt-web] retained compaction fallback=source_unavailable_before_handoff");
 });
 
 test("compact cleanup failure preserves both the handoff error and retirement cause", async () => {

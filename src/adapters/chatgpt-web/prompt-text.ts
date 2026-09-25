@@ -23,6 +23,14 @@ export function readChatGptPromptText(
   options?: { preserveLeading?: boolean },
 ): string {
   const clone = element.cloneNode(true) as HTMLElement;
+  // The app-shell editor follows each mention with one separator space, as the legacy pill did with
+  // its cursor target. It belongs to the mention; the bridge still inserts its own separator.
+  clone.querySelectorAll("[app-mention-display-name]").forEach(mention => {
+    const separator = mention.nextSibling;
+    if (separator?.nodeType === 3 && /^[  ]/.test(separator.textContent ?? "")) {
+      separator.textContent = separator.textContent!.slice(1);
+    }
+  });
   // Legacy plugin pills and app-shell mention nodes are composer chrome, not prompt text.
   clone.querySelectorAll('[data-id^="plugin:"][data-keyword], [app-mention-display-name], [data-inline-selection-pill-cursor-target]')
     .forEach(part => part.remove());

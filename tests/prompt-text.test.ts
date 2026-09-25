@@ -57,6 +57,26 @@ test("characterizes existing top-level/LF, decoration and leading-whitespace rea
   expect(readChatGptPromptText(element, { preserveLeading: true })).toBe("\u2028\u2029\uFEFFpayload");
 });
 
+test("an app-shell mention and its editor separator are composer chrome", () => {
+  const { createDocument } = require("@mixmark-io/domino") as { createDocument(html: string): Document };
+  const mention = '<span app-mention-display-name="Codex Native2" contenteditable="false">PRIVATE_MENTION</span>';
+  const document = createDocument(`<div id="composer"><p>${mention} </p></div>`);
+  const element = document.getElementById("composer")!;
+  // A freshly selected connector leaves no prompt text, even when leading whitespace is exact.
+  expect(readChatGptPromptText(element, { preserveLeading: true })).toBe("");
+  expect(element.textContent).toBe("PRIVATE_MENTION "); // reader cloned, never mutated the live root
+  // The bridge's own separator survives after the editor's; exactly one character is chrome.
+  element.innerHTML = `<p>${mention}  payload\nnext</p>`;
+  expect(readChatGptPromptText(element, { preserveLeading: true })).toBe(" payload\nnext");
+  element.innerHTML = `<p>${mention}\u00A0 payload</p>`;
+  expect(readChatGptPromptText(element, { preserveLeading: true })).toBe(" payload");
+  // Whitespace that does not follow a mention is prompt text.
+  element.innerHTML = `<p>${mention}</p><p>  payload</p>`;
+  expect(readChatGptPromptText(element, { preserveLeading: true })).toBe("\n  payload");
+  element.innerHTML = "<p>  payload</p>";
+  expect(readChatGptPromptText(element, { preserveLeading: true })).toBe("  payload");
+});
+
 
 test("verified marker progress is observable but never logged once per marker", () => {
   let now = 0;

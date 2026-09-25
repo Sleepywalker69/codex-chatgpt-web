@@ -241,6 +241,17 @@ export class ChatGptTurnSessions {
     return { cancelled: matches.length, settlement };
   }
 
+  /** Diagnostics only: how live sessions of one native turn were keyed, without their content. */
+  nativeTurnSessionShapes(threadId: string, turnId: string): Array<{ model: string | null; family: string | null; reasoning: string | null }> {
+    return [...this.entries.values()]
+      .filter(session => session.runtime.nativeIdentity?.threadId === threadId && session.runtime.nativeIdentity.turnId === turnId)
+      .map(session => ({
+        model: session.runtime.usageInput?.modelId ?? null,
+        family: session.runtime.usageInput?._chatgptModelFamily ?? null,
+        reasoning: session.runtime.usageInput?.options.reasoning ?? null,
+      }));
+  }
+
   private beginRetirement(key: string, session: ChatGptTurnSession, preserveConversationKey?: string, reason?: Error): Promise<void> {
     session.cancel(reason);
     const conversationKey = session.conversationKey();
