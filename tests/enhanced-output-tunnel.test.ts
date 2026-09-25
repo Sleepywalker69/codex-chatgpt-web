@@ -136,6 +136,43 @@ test("broker seal rejects a tool that starts after the browser's last observatio
   expect(sealTurnOutput(channel, 0, channel.activityRevision)).toBeTrue();
 });
 
+test("a tunneled wait reports quiet periods, and tool activity or output starts a new one", async () => {
+  const reports: Array<{ quietMs: number; running: boolean; submittedTurnPresent?: boolean }> = [];
+  let revision = 0;
+  let running = true;
+  let deliver!: (event: BrokerTurnOutputEvent) => void;
+  const delivered = new Promise<BrokerTurnOutputEvent>(resolve => { deliver = resolve; });
+  const until = async (ready: () => boolean) => {
+    for (let waited = 0; !ready(); waited += 5) {
+      if (waited > 2_000) throw new Error("quiet report did not arrive");
+      await Bun.sleep(5);
+    }
+  };
+  const run = runChatGptTunneledOutputTurn({
+    output: {
+      next: (after, signal) => after < 1 ? delivered : new Promise((_, reject) => signal?.addEventListener(
+        "abort", () => reject(new DOMException("aborted", "AbortError")), { once: true })),
+      reset: async () => {}, seal: async () => true,
+    },
+    observe: async () => ({ running, responsePresent: false, submittedTurnPresent: true, activityRevision: revision }),
+    onQuiet: (observed, quietMs) => reports.push({ quietMs, running: observed.running,
+      submittedTurnPresent: observed.submittedTurnPresent }),
+    attempt: 1, onFinal: () => {}, pollMs: 2, quietReportMs: 20,
+  });
+  await until(() => reports.length >= 2);
+  expect(reports[0]).toEqual({ quietMs: expect.any(Number), running: true, submittedTurnPresent: true });
+  expect(reports[0]!.quietMs).toBeGreaterThanOrEqual(20);
+  expect(reports[1]!.quietMs).toBeGreaterThan(reports[0]!.quietMs);
+  // A native tool call is progress even though nothing was tunneled.
+  const beforeTool = reports.length;
+  revision += 1;
+  await until(() => reports.slice(beforeTool).some((report, index) =>
+    report.quietMs < reports[beforeTool + index - 1]!.quietMs));
+  running = false;
+  deliver({ sequence: 1, kind: "final", text: "Done." });
+  expect(await run).toEqual({ status: "complete", answer: "Done." });
+});
+
 test("DOM fallback carries its completion fence revision into the output seal", async () => {
   let sealedRevision: number | undefined;
   const output = queue([]);

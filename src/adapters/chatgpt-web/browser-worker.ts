@@ -248,6 +248,7 @@ export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 60_000;
 export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
 const CHATGPT_PREEMPTIVE_RETRY_STOP_TIMEOUT_MS = 15_000;
+const CHATGPT_TUNNELED_QUIET_CAPTURE_MS = 5 * 60_000;
 const CHATGPT_CONNECTOR_MENTION_QUERY = "@codex";
 const CHATGPT_SMOKE_TEXT = "Reply with exactly: CODEX WEB GPT READY";
 const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
@@ -3947,6 +3948,8 @@ export class ChatGptBrowserWorker {
           const tunneledObservationRecovery = new ChatGptObservationRecoveryEpisode(
             () => deadline === undefined ? Infinity : deadline - Date.now(),
           );
+          let lastQuietMs = 0;
+          let quietCaptured = false;
           const tunneled = await runChatGptTunneledOutputTurn({
             output: turn.tunneledOutput,
             afterSequence: tunneledOutputSequence,
@@ -4094,7 +4097,21 @@ export class ChatGptBrowserWorker {
                   || (current.knownTurnIdentities ?? []).some(identity => !initialTurns.has(identity)),
                 running,
                 toolCallsInFlight: chatGptExternalToolCallsAreInFlight(turn.externalProgress?.snapshot()),
+                activityRevision: turn.externalProgress?.snapshot().revision,
               };
+            },
+            onQuiet: (observed, quietMs) => {
+              console.info(`[chatgpt-web] browser turn ${turn.traceId} tunneled output quiet quietMs=${quietMs}`
+                + ` running=${observed.running} responsePresent=${observed.responsePresent}`
+                + ` submittedTurnPresent=${observed.submittedTurnPresent === true}`
+                + ` toolCallsInFlight=${observed.toolCallsInFlight === true}`);
+              // One page-state record per long silence tells a long think from a silently stopped turn.
+              if (quietMs < lastQuietMs) quietCaptured = false;
+              lastQuietMs = quietMs;
+              if (!quietCaptured && quietMs >= CHATGPT_TUNNELED_QUIET_CAPTURE_MS) {
+                quietCaptured = true;
+                void diagnostics.capture(page, "tunneled-output-quiet");
+              }
             },
             onReasoning: text => turn.onReasoningSummary?.(text),
             onCommentary: text => turn.onCommentary?.(text),

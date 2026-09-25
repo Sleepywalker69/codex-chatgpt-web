@@ -15,6 +15,8 @@ interface TunnelObservation {
   /** The submitted turn is identified even though no assistant turn has been projected. */
   submittedTurnPresent?: boolean;
   toolCallsInFlight?: boolean;
+  /** Native tool activity revision; a change is model progress while no output is tunneled. */
+  activityRevision?: number;
 }
 
 interface TunnelOptions {
@@ -31,6 +33,9 @@ interface TunnelOptions {
   onFinal(text: string): void;
   onHeartbeat?(): void;
   onProgress?(): void;
+  /** Content-free report of a wait with neither tunneled output nor tool activity. */
+  onQuiet?(observation: TunnelObservation, quietMs: number): void;
+  quietReportMs?: number;
   signal?: AbortSignal;
   deadline?: number;
   attempt: number;
@@ -59,7 +64,12 @@ export async function runChatGptTunneledOutputTurn(options: TunnelOptions): Prom
   let preemptiveRetry: string | undefined;
   let stopRequested = false;
   let lastHeartbeat = 0;
+  const quietReportMs = options.quietReportMs ?? 60_000;
+  let quietSince = Date.now();
+  let quietReportedAt = quietSince;
+  let activityRevision: number | undefined;
   const acceptOutput = (event: BrokerTurnOutputEvent): void => {
+    quietSince = quietReportedAt = Date.now();
     sequence = event.sequence;
     pending = waitForOutput(options.output, sequence, signal);
     fenceRevision = undefined;
@@ -81,6 +91,13 @@ export async function runChatGptTunneledOutputTurn(options: TunnelOptions): Prom
       }
 
       const observed = await options.observe();
+      if (observed.activityRevision !== activityRevision) {
+        activityRevision = observed.activityRevision;
+        quietSince = quietReportedAt = Date.now();
+      } else if (Date.now() - quietReportedAt >= quietReportMs) {
+        quietReportedAt = Date.now();
+        options.onQuiet?.(observed, quietReportedAt - quietSince);
+      }
       preemptiveRetry ??= options.takePreemptiveRetry?.();
       if (preemptiveRetry && observed.running && !stopRequested) {
         stopRequested = true;
